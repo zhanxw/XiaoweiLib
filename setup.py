@@ -3,11 +3,12 @@ from distutils.core import setup
 setup(
     name = "XiaoweiLib",
     # https://docs.python.org/2/distutils/examples.html
-    py_modules=['src/OrderedSet',
-        'src/PrettyTable',
-        'src/XiaoweiJob',
-        'src/XiaoweiLib',
-        'src/XiaoweiTask'],
+    py_modules=['OrderedSet',
+        'PrettyTable',
+        'XiaoweiJob',
+        'XiaoweiLib',
+        'XiaoweiTask'],
+    #packages = ['XiaoweiLib'],
     version = "1.0",
     description = "Common codes used by Xiaowei",
     author = "Xiaowei Zhan",
