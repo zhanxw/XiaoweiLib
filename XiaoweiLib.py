@@ -1,3 +1,4 @@
+from __future__ import print_function
 import os, sys, re
 try:
     from subprocess import Popen, PIPE, call
@@ -5,6 +6,7 @@ except:
     sys.path = [re.sub(r'^/home/zhanxw/', '/net/dumbo/home/zhanxw/', x) for x in sys.path]
     sys.path.append('/net/dumbo/home/zhanxw/python27/lib/python2.7/')
     from subprocess import Popen, PIPE, call
+
 from multiprocessing import Pool
 import gzip
 import signal
@@ -36,7 +38,7 @@ class CalledProcessTimeOutError(CalledProcessError):
 def printTotalThread():
     import threading
     for t in threading.enumerate():
-        print 'thread = ', t
+        print ('thread = ', t)
         
 def mycheck_output(*popenargs, **kwargs):
     if 'timeOut' not in kwargs:
@@ -48,7 +50,7 @@ def mycheck_output(*popenargs, **kwargs):
         del kwargs['timeOut']
         timeOut = int(timeOut)
     except:
-        print >> sys.stderr, "Time out is not an integer", timeOut
+        print ("Time out is not an integer", timeOut, file = sys.stderr)
         return None
     
     import subprocess, threading
@@ -150,7 +152,7 @@ def getSMTag(fn):
     o = filter(lambda x: pat.search(x) != None , o)
     o = [ln for ln in o if ln[:3] == '@RG']
     if len(o) != 1:
-        print >> sys.stderr, "%s has multiple tags!!" % fn
+        print ("%s has multiple tags!!" % fn, file = sys.stderr)
     for ln in o:
         #print 'ln=', ln
         for x in ln.split('\t'):
@@ -161,8 +163,8 @@ def getSMTag(fn):
                     #print "%s\t%s" % (fn, x[3:])
                 else:
                     if smTag[3:] != x[3:]:
-                        print >>sys.stderr, "%s has multiple CONFLICT tags (comparing to %s)!" % (smTag, x[3:])
-                        print >>sys.stderr, smTag
+                        print ("%s has multiple CONFLICT tags (comparing to %s)!" % (smTag, x[3:]), file = sys.stderr)
+                        print (smTag, file = sys.stderr)
     # if smTag == '':
     #   print "%s\tNA" % fn
     return smTag
@@ -223,7 +225,7 @@ class BedFile:
                 if trimChrPrefix:
                     chrom = chrom[3:]
                 else:
-                    print >> sys.stderr, "Be cautious of 'chr' as chromosome prefix"
+                    print ("Be cautious of 'chr' as chromosome prefix", file = sys.stderr)
             beg, end = int(beg), int(end)
             if chrom in self.data:
                 self.data[chrom].append( [beg, end] )
@@ -297,42 +299,216 @@ class BedFile:
 # 1       249250621       52      60      61
 # 2       243199373       253404903       60      61
 class GenomeSequence:
+    gs = None
     def __init__(self):
-        self.fn = ''
-        self.data = {}
-        self.fileHandle = None
-        
-    def open(self, fn):
-        # read index
-        if not os.path.exists(fn + '.fai'):
-            print >> sys.stderr, "Cannot .fai index file for %s, consider create index using 'samtools faidx %s'" % (fn, fn)
-            return False
-        self.fn = fn
+        pass
+    def isGzFile(self, fn):
         try:
-            self.fileHandle = open(self.fn)
-            for ln in myopen(fn + '.fai'):
-                fd = ln.strip().split()
-                self.data[fd[0]] = map(int, fd[1:])
-            return True
+            with open(fn) as f:
+                GZMagicNumber = '\x1f\x8b\x08'
+                if f.read(3) == GZMagicNumber:
+                    return True
         except:
-            return False
-    # return base at 0-based position
-    # return None if something wrong
-    def getBase(self, chrom, pos):
-        if chrom not in self.data:
-            return None
-        size, loc, basesPerLine, bytePerLine = self.data[chrom]
-        if pos < 0 or pos >= size:
-            return None
-        lineNo = pos / basesPerLine
-        remainder = pos % basesPerLine
-        filePos = loc + lineNo * bytePerLine + remainder
-        #print filePos, lineNo, remainder, self.data[chrom]
-        self.fileHandle.seek(filePos, os.SEEK_SET)
-        return self.fileHandle.read(1)
-    def close(self):
-        if self.fileHandle:
-            self.fileHandle.close()
+            pass
+        return False
+    #' Check if it is plain .fa file
+    def isPlainFile(self, fn):
+        try:
+            with open(fn) as f:
+                if f.read(1) == ">":
+                    return True
+        except:
+            pass
+        return False
+    # return number of chromosomes loaded
+    def open(self, fn):
+        if not os.path.exists(fn):
+            print ("Reference genome file does not exist: " + fn, file = sys.stderr)
+            return -1
+        
+        # check if .fai file exists
+        if os.path.exists(fn + '.fai') or os.path.exists(fn.replace('.gz', '') + '.fai'):
+            # check if fn is a gzip file
+            if self.isGzFile(fn):
+                self.gs = BgzipIndexedGenomeSequence()
+            elif self.isPlainFile(fn):
+                self.gs = PlainIndexedGenomeSeqeunce()
+            else:
+                print ("Unsupported genome sequence type!", file = sys.stderr)
+                return -1
+        else:
+            self.gs = InMemoryGenomeSequence()
+        return self.gs.open(fn)
+    def read(self, fn):
+        return self.gs.open(fn)
+    # pos: 0-based index
+    def getBase0(self, chrom, pos):
+        return self.gs.getBase0(chrom, pos)
+    # pos: 1-based index
+    def getBase1(self, chrom, pos):
+        return self.gs.getBase1(chrom, pos)
+
+# Genome sequence is xxx.fa or xxx.fa.gz, but does not have the .fai index        
+class InMemoryGenomeSequence:
+    gs = dict()
+    def __init__(self):
+        pass
+    def open(self, fn):
+        content = [ln.strip() for ln in myopen(fn).readlines() if len(ln.strip()) > 0 ]
+        chromIdx = [i for i, ln in enumerate(content) if ln[0] == '>' ]
+        chroms = [content[i][1:].split()[0].replace('chr', '') for i in chromIdx]
+        seqIdx = [ (chromIdx[i], chromIdx[i+1]) for i in xrange(len(chromIdx) - 1) ]
+        seqIdx.append( (chromIdx[-1], len(content) ) )
+        seq = [ ''.join(content[ ( i[0] + 1) : i[1]]) for i in seqIdx]
+        self.gs = dict(zip(chroms, seq))
+        for k, v in self.gs.iteritems():
+            print ("Chromosome %s loaded with %d bases" % (k, len(v)), file = sys.stderr)
+        return len(self.gs)
+    def read(self, fn):
+        return self.open(fn)
+    # pos: 0-based index
+    def getBase0(self, chrom, pos):
+        chrom = chrom.replace('chr','')
+        pos = int(pos)
+        if chrom not in self.gs:
+            return 'N'
+        return self.gs[chrom][pos]
+    # pos: 1-based index
+    def getBase1(self, chrom, pos):
+        chrom = chrom.replace('chr','')
+        pos = int(pos)
+        if chrom not in self.gs:
+            return 'N'
+        return self.gs[chrom][pos - 1]
+
+## Sequence file is xxx.fa, and has an index file xxx.fa.fai
+class PlainIndexedGenomeSeqeunce:
+    handle = None
+    index = {}
+    def __init__(self):
+        pass
+    def open(self, fn):
+        self.handle = open(fn, 'r')
+        # read fai
+        for ln in myopen(fn + '.fai'):
+            fd = ln.strip().split()
+            self.index[fd[0].replace('chr', '')] = [int(i) for i in fd[1:]]
+        return len(self.index)            
+    def read(self,fn):
+        return self.open(fn)
+    def getBase0(self, chrom, pos):
+        chrom = chrom.replace('chr','')
+        if chrom not in self.index:
+            return 'N'
+        chromLen, fileOffset, nchar, nchar2 = self.index[chrom]
+        if pos >= chromLen or pos < 0:
+            return 'N'
+        a, b = divmod(pos, nchar)
+        offset = fileOffset + a * nchar2 + b
+        self.handle.seek(offset)
+        return self.handle.read(1)
+
+    # pos: 1-based index
+    def getBase1(self, chrom, pos):
+        return self.getBase0(chrom, pos - 1)
+
+## Sequence file is xxx.fa.gz, and has an index file xxx.fa.gz.fai (or xxx.fa.fai)
+class BgzipIndexedGenomeSequence:
+    handle = None
+    voffset = []  # store virtual offsets [raw_start, raw_len, data_start, data_len]
+    vdataOffset = []
+    vidx = None
+    index = {}
+    def __init__(self):
+        try:
+            from Bio import bgzf
+        except:
+            print ("Cannot import Bio.bgzf, need to check the installation", file = sys.stderr)
+        pass
+    def open(self, fn):
+        from Bio import bgzf        
+        self.handle = bgzf.BgzfReader(fn)
+        # read bgzf blocks
+        from time import ctime
+
+        self.voffset = self.computeBgzfBlocks(fn)
+        # with open(fn) as f:
+        #     for v in bgzf.BgzfBlocks(f):
+        #         self.voffset.append(v)
+        self.vdataOffset = [i[2] for i in self.voffset]
+        # read fai
+        if os.path.exists(fn + '.fai'):
+            indexFilename = fn + '.fai'
+        elif os.path.exists(fn.replace('.gz', '') + '.fai'):
+            indexFilename = fn.replace('.gz', '') + '.fai'
+        else:
+            indexFilename = None
+        for ln in myopen(indexFilename):
+            fd = ln.strip().split()
+            self.index[fd[0].replace('chr', '')] = [int(i) for i in fd[1:]]
+        return len(self.index)
+    # a quick way to get bgzf blocks
+    # similar to Bio.bgzf.BgzfBlocks()
+    # return [(raw start, raw length, data start, data length)...]
+    # refer to the BGZF specification at:
+    # https://samtools.github.io/hts-specs/SAMv1.pdf
+    def computeBgzfBlocks(self, fn):
+        import struct
+        blocks = []
+        f = open(fn, 'rb')
+        poffset = 0 # physical offset
+        doffset = 0 # data offset (in uncompressed data)
+        while True:
+          f.seek(poffset, 0)
+          id1, id2, cm, flg, mtime, xfl, os, xlen = struct.unpack('<BBBBIBBH', f.read(12))
+          assert xlen == 6
+          si1, si2, slen, bsize = struct.unpack('<BBHH', f.read(6))
+          f.seek(poffset + bsize + 1 - 4, 0)
+          isize = struct.unpack('<I', f.read(4))[0]
+          v = (poffset, bsize + 1, doffset, isize)
+          # print >> fout, v
+          blocks.append( v )
+
+          poffset += bsize + 1
+          doffset += isize
+
+          if  not f.read(1): # reach the file end
+              break
+        #print blocks
+        return blocks
+    # seek to the virtual_offset in the bgzf file (dataOffset is the offset for uncompressed data)
+    def seekToPosition(self, dataOffset):
+        from Bio import bgzf        
+        # binary search
+        from bisect import bisect_right
+        lo = 0
+        if self.vidx != None and self.vdataOffset[self.vidx] < dataOffset:
+            lo = self.vidx
+        hi = len(self.vdataOffset)
+        if self.vidx != None and lo + 50 < len(self.vdataOffset) and self.vdataOffset[self.vidx+50] > dataOffset:
+            hi = self.vidx + 50
+        self.vidx = bisect_right(self.vdataOffset, dataOffset, lo = lo, hi = hi)
+        self.vidx -= 1
+        # print self.vidx
+        # need to first get virtual offset of BGZF
+        vo = bgzf.make_virtual_offset(self.voffset[self.vidx][0], dataOffset - self.vdataOffset[self.vidx])
+        self.handle.seek(vo)
+    def read(self,fn):
+        return self.open(fn)
+    def getBase0(self, chrom, pos):
+        chrom = chrom.replace('chr','')
+        if chrom not in self.index:
+            return 'N'
+        chromLen, fileOffset, nchar, nchar2 = self.index[chrom]
+        if pos >= chromLen or pos < 0:
+            return 'N'
+        a, b = divmod(pos, nchar)
+        offset = fileOffset + a * nchar2 + b
+        self.seekToPosition(offset)
+        return self.handle.read(1)
+    # pos: 1-based index
+    def getBase1(self, chrom, pos):
+        return self.getBase0(chrom, pos - 1)
 
 def run(cmd):
     print("= %s" % cmd)
@@ -383,7 +559,7 @@ class SAMReader:
             self.f = open(fileName)
         elif (isBam == True and fileName[-4:] == ".bam"):
             args = "samtools view " + fileName
-            print args.split()
+            print (args.split())
             self.f = Popen( args.split(), stdout=PIPE).stdout
         else:
             print("your suffix and does not match value self.isBam")
@@ -435,7 +611,7 @@ class SAMReader:
         return record
 
     def dump(self):
-        print self.line
+        print (self.line)
 
 # from Dive into Python
 def info(object, spacing=10, collapse=1):   
@@ -444,10 +620,10 @@ def info(object, spacing=10, collapse=1):
     Takes module, class, list, dictionary, or string."""
     methodList = [method for method in dir(object) if callable(getattr(object, method))]
     processFunc = collapse and (lambda s: " ".join(s.split())) or (lambda s: s)
-    print "\n".join(["%s %s" %
+    print ("\n".join(["%s %s" %
                       (method.ljust(spacing),
                        processFunc(str(getattr(object, method).__doc__)))
-                     for method in methodList])
+                     for method in methodList]))
 
 
 #import __main__ # will access the global variables set in __main__
@@ -513,7 +689,7 @@ class GetOptClass:
         for i in optList:
             for j in i[1]:
                 if len(j) == 0 or j[0] != '-':
-                    print "Illegal options: %s" % j
+                    print ("Illegal options: %s" % j)
                     sys.exit(1)
                 optDict[j] = i[0]
 
@@ -532,16 +708,16 @@ class GetOptClass:
                     try:
                         exec("__main__.%s = True" % varName ) 
                     except:
-                        print "Cannot set the boolean variable: %s" % varName
+                        print ("Cannot set the boolean variable: %s" % varName)
                 else:
                     try:
                         arg = sys.argv[index+1]
                     except:
-                        print "Not provided argument for option: %s" % varName
+                        print ("Not provided argument for option: %s" % varName)
                     try:
                         exec("__main__.%s = (__main__.%s.__class__)(%s)" % (varName, varName, repr(arg)))
                     except:
-                        print "Cannot set the boolean variable: %s" % varName
+                        print ("Cannot set the boolean variable: %s" % varName)
                     index += 1
             else:
                 self.rest.append(opt)
@@ -553,17 +729,17 @@ class GetOptClass:
             self.dump(optList, optDict)
         
     def dump(self, optList, optDict):
-        print "%s by Xiaowei Zhan" % sys.argv[0]
-        print
-        print "User Specified Options"
+        print ("%s by Xiaowei Zhan" % sys.argv[0])
+        print ()
+        print ("User Specified Options")
         for i in optList:
             try:
-                print (",".join(i[1])).rjust(20),':',
+                print ((",".join(i[1])).rjust(20),':', end = '')
                 exec ("print %s " % optDict[i[1][0]])
             except:
-                print "Failed to dump ", i
+                print ("Failed to dump ", i)
                 raise
-        print 'rest arguments'.rjust(20), ':', ",".join(self.rest)
+        print ('rest arguments'.rjust(20), ':', ",".join(self.rest))
 
 # from Dabeaz's great slides
 import os 

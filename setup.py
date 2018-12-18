@@ -1,44 +1,39 @@
-# chardet's setup.py
-from distutils.core import setup
-setup(
+# https://packaging.python.org/tutorials/packaging-projects/#packaging-your-project
+import setuptools
+
+with open("README.md", "r") as fh:
+    long_description = fh.read()
+
+setuptools.setup(
     name = "XiaoweiLib",
-    # https://docs.python.org/2/distutils/examples.html
+    version = "1.2.7",
+    author = "Xiaowei Zhan",
+    author_email = "zhanxw@gmail.com",
+    description = "Common codes used by Xiaowei",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    url = "https://github.com/zhanxw/XiaoweiLib",
+    # do NOT use packages, as this is a module only package,
+    # otherwise, packages= create __init__.py and messed the namespaces
+    #packages=setuptools.find_packages(), 
+    classifiers = [
+        "Programming Language :: Python",
+        "Programming Language :: Python :: 2",
+        "Programming Language :: Python :: 3",
+        "Development Status :: 4 - Beta",
+        "Environment :: Other Environment",
+        "Intended Audience :: Developers",
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: GNU General Public License (GPL)",
+        "Operating System :: OS Independent",
+        "Topic :: Scientific/Engineering",
+        "Topic :: Software Development :: Testing",
+        ],
+    
     py_modules=['OrderedSet',
         'PrettyTable',
         'XiaoweiJob',
         'XiaoweiLib',
         'XiaoweiTask'],
-    #packages = ['XiaoweiLib'],
-    version = "1.1",
-    description = "Common codes used by Xiaowei",
-    author = "Xiaowei Zhan",
-    author_email = "zhanxw@gmail.com",
-    url = "https://github.com/zhanxw/XiaoweiLib",
-    download_url = "https://pypi.python.org/pypi/XiaoweiLib",
     keywords = ["zhanxw", "library", "python", "utility"],
-    classifiers = [
-        "Programming Language :: Python",
-	"Programming Language :: Python :: 2",
-        "Development Status :: 4 - Beta",
-        "Environment :: Other Environment",
-        "Intended Audience :: Developers",
-	"Intended Audience :: Science/Research",
-	"License :: OSI Approved :: GNU General Public License (GPL)",
-        "Operating System :: OS Independent",
-	"Topic :: Scientific/Engineering",
-        "Topic :: Software Development :: Testing",
-	"Topic :: System :: Monitoring",
-        ],
-    long_description = """\
-Common Codes Used by Xiaowei
--------------------------------------
-
-Please read source codes.
-
-Contact
--------
-
-  Xiaowei Zhan<zhanxw[at]gmail.com>
-  
-"""
 )
