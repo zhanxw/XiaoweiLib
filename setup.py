@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name = "XiaoweiLib",
-    version = "1.2.7",
+    version = "1.2.8",
     author = "Xiaowei Zhan",
     author_email = "zhanxw@gmail.com",
     description = "Common codes used by Xiaowei",
